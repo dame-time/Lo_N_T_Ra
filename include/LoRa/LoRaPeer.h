@@ -4,11 +4,12 @@
 #include "Arduino.h"
 
 #include <map>
+#include <set>
 #include <queue>
 
-#define BUFFER_SIZE 64 // Define the payload size
+#define BUFFER_SIZE 2047 // Define the payload size
 
-namespace LoRa
+namespace LoRaDevice
 {
     // TODO: In future swap all of that so I communicate only with a gateway and not like a pure peer
     // TODO: When a peer join the network it sends his public key to the gateway, then the gateway handle everything
@@ -49,6 +50,8 @@ namespace LoRa
 
             std::map<String, Message> messagesStatus;
             std::queue<Message> messageQueue;
+
+            std::set<String> receivedMessages;
 
             static char txpacket[BUFFER_SIZE];
             static char rxpacket[BUFFER_SIZE];

@@ -44,7 +44,7 @@ class Device
 
     public:
         BT::BLEConnection* btConnection;
-        LoRa::LoRaPeer* loraPeer;
+        LoRaDevice::LoRaPeer *loraPeer;
 
         static Device& getInstance();
 

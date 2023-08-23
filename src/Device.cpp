@@ -18,10 +18,10 @@ Device::Device()
 
 void Device::initialize() 
 {
-    name = name == "" ? "LoNTRa_0" : name;
+    name = name == "" ? "LoNTRa0" : name;
 
     btConnection = new BT::BLEConnection(name);
-    loraPeer = new LoRa::LoRaPeer();
+    loraPeer = new LoRaDevice::LoRaPeer();
 
     connectedPeers.clear();
 
@@ -118,12 +118,13 @@ void Device::clearDeadPeers()
 #endif
 
         for (auto it = connectedPeers.begin(); it != connectedPeers.end();)
-            if (millis() - it->second > heartbeatInterval)
+            if (millis() - it->second > (heartbeatInterval * 3))
             {
                 Serial.println("Succesfully deleted a dead peer: " + it->first);
                 Serial.println("With millis: " + String(it->second));
                 Serial.println("Difference: " + String(millis() - it->second));
                 Serial.println("Map Len: " + String(connectedPeers.size()));
+                printMap();
                 it = connectedPeers.erase(it);
             }
             else
