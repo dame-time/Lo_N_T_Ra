@@ -20,8 +20,11 @@ namespace LoRaDevice
         public:
             LoRaPeer();
 
-            void sendMessage(const char *msg);
-            void sendMessage(const String& msg);
+            void broadcastMessage(const char *msg);
+            void broadcastMessage(const String& msg);
+
+            void sendMessage(const char *msg, const char* destination);
+            void sendMessage(const String& msg, const String& destination);
 
             void sendHeartbeat();
 
@@ -33,9 +36,16 @@ namespace LoRaDevice
             {
                 String body;
                 String header;
+                String destination;
                 String uuid;
                 long lastTimestamp;
                 int retries;
+            };
+
+            enum MessageType
+            {
+                BROADCAST,
+                DIRECT
             };
 
             // Internal state and configuration
@@ -47,6 +57,7 @@ namespace LoRaDevice
             };
 
             static LoRaPeer* instance;
+            const char messageDivider = '_';
 
             std::map<String, Message> messagesStatus;
             std::queue<Message> messageQueue;

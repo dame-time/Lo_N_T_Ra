@@ -3,21 +3,23 @@
 #include <GUI/Display.h>
 #include <Device.h>
 
+#include <Utils/StringUtils.h>
+
 #include <set>
 #include <sstream>
 #include <string>
 #include <iostream>
 
-#define RF_FREQUENCY 868000000 // Hz
+#define RF_FREQUENCY 868000000  // Hz
 
-#define TX_OUTPUT_POWER 20 // dBm
+#define TX_OUTPUT_POWER 20      // dBm
 
-#define LORA_BANDWIDTH 2       // [0: 125 kHz,
+#define LORA_BANDWIDTH 2        // [0: 125 kHz,
                                 //  1: 250 kHz,
                                 //  2: 500 kHz,
                                 //  3: Reserved]
 #define LORA_SPREADING_FACTOR 6 // [SF7..SF12]
-#define LORA_CODINGRATE 2     // [1: 4/5,
+#define LORA_CODINGRATE 1       // [1: 4/5,
                                 //  2: 4/6,
                                 //  3: 4/7,
                                 //  4: 4/8]
@@ -87,11 +89,12 @@ namespace LoRaDevice
         return uuid;
     }
 
-    void LoRaPeer::sendMessage(const char *msg)
+    void LoRaPeer::sendMessage(const char *msg, const char* destination)
     {
         Message message;
         message.body = msg;
         message.header = "M:" + String(strlen(msg)) + "_" +  Device::getInstance().getUUID();
+        message.destination = String(destination);
         message.uuid = generateMessageUUID();
         message.lastTimestamp = millis();
         message.retries = 6;
@@ -101,9 +104,29 @@ namespace LoRaDevice
         state = STATE_TX;
     }
 
-    void LoRaPeer::sendMessage(const String &msg)
+    void LoRaPeer::sendMessage(const String &msg, const String& destination)
     {
-        sendMessage(msg.c_str());
+        sendMessage(msg.c_str(), destination.c_str());
+    }
+
+    void LoRaPeer::broadcastMessage(const char *msg)
+    {
+        Message message;
+        message.body = msg;
+        message.header = "M:" + String(strlen(msg)) + "_" + Device::getInstance().getUUID();
+        message.destination = "B";
+        message.uuid = generateMessageUUID();
+        message.lastTimestamp = millis();
+        message.retries = 6;
+
+        messagesStatus[message.uuid] = message;
+        messageQueue.push(message);
+        state = STATE_TX;
+    }
+
+    void LoRaPeer::broadcastMessage(const String &msg)
+    {
+        broadcastMessage(msg.c_str());
     }
 
     void LoRaPeer::send(const char *msg)
@@ -185,7 +208,8 @@ namespace LoRaDevice
                 while (!messageQueue.empty())
                 {
                     Message message = messageQueue.back();
-                    String messageString = message.header + "_" + message.uuid + "_" + message.body;
+                    String messageString = message.header + "_" + message.destination + "_" + message.uuid + "_" + message.body;
+
                     char packet[BUFFER_SIZE];
                     strncpy(packet, messageString.c_str(), BUFFER_SIZE);
 #if DEBUG == 1
@@ -244,25 +268,10 @@ namespace LoRaDevice
             // Serial.printf("\r\nReceived packet \"%s\" with RSSI %d, length %d\r\n", rxpacket, Rssi, rxSize);
             // Serial.println("Heartbeat: " + messageBody);
             auto messageBody = receivedString.substring(2);
+            auto parsedMessage = Utils::StringUtils::parseUnderscoreString(messageBody, instance->messageDivider);
 
-            String messageLength = "";
-            String peerName = "";
-
-            std::stringstream ss(messageBody.c_str());
-            std::string token;
-            int i = 0;
-
-            while (std::getline(ss, token, '_'))
-            {
-                auto splittedString = token.c_str();
-
-                if (i == 0)
-                    messageLength = splittedString;
-                else
-                    peerName = splittedString;
-
-                ++i;
-            }
+            String messageLength = parsedMessage[0];
+            String peerName = parsedMessage[1];
 
             if (messageLength.toInt() > peerName.length())
             {
@@ -289,48 +298,70 @@ namespace LoRaDevice
             Serial.printf("\r\nReceived packet \"%s\" with RSSI %d, length %d, size %d\r\n", rxpacket, Rssi, rxSize, size);
 
             auto messageBody = receivedString.substring(2);
-            std::string messageBodyString = messageBody.c_str();
-            std::stringstream ss(messageBodyString);
-            std::string token;
-            int i = 0;
+            auto parsedString = Utils::StringUtils::parseString(messageBody.c_str(), instance->messageDivider);
 
-            String messageText = "";
             String messageLength = "";
             String senderID = "";
+            String destinationID = "";
             String messageID = "";
+            String messageText = "";
 
-            while (std::getline(ss, token, '_'))
+            MessageType messageType;
+
+            if (destinationID != "B")
             {
-                auto splittedString = token.c_str();
+                messageLength = parsedString[0];
+                senderID = parsedString[1];
+                destinationID = parsedString[2];
+                messageID = parsedString[3];
+                for (int i = 4; i < parsedString.size(); i++)
+                    messageText += parsedString[i];
 
-                if (i == 0)
-                    messageLength = splittedString;
-                else if(i == 1)
-                    senderID = splittedString;
-                else if (i == 2)
-                    messageID = splittedString;
-                else 
-                {
-                    // TODO: Handle _ (underscores) in the message text
-                    if (i == 3)
-                        messageText = splittedString;
-                    else
-                        messageText += String("_") + splittedString;
-                }
+                messageType = MessageType::DIRECT;
+            }
+            else
+            {
+                messageLength = parsedString[0];
+                senderID = parsedString[1];
+                messageID = parsedString[2];
+                for (int i = 3; i < parsedString.size(); i++)
+                    messageText += parsedString[i];
 
-                ++i;
+                messageType = MessageType::BROADCAST;
             }
 
-            Serial.println("Message -" + messageID + "- received!");
-            Serial.println("Length: " + messageLength);
-            Serial.println("Body: " + messageText);
-
-            if (messageLength.toInt() > messageText.length())
-                Serial.println("Message needs retransmission! Lengths: " + messageLength + " - " + String(messageText.length()));
-            else if (instance->receivedMessages.find(messageID) == instance->receivedMessages.end())
+            if (messageType == MessageType::DIRECT && Device::getInstance().getUUID().equals(destinationID))
             {
-                instance->receivedMessages.insert(messageID);
-                instance->sendACK(messageID);
+                Serial.println("Message -" + messageID + "- received!");
+                Serial.println("Receiver -" + destinationID + "-");
+                Serial.println("Length: " + messageLength);
+                Serial.println("Body: " + messageText);
+
+                if (messageLength.toInt() > messageText.length())
+                    Serial.println("Message needs retransmission! Lengths: " + messageLength + " - " + String(messageText.length()));
+                else if (instance->receivedMessages.find(messageID) == instance->receivedMessages.end())
+                {
+                    instance->receivedMessages.insert(messageID);
+                    instance->sendACK(messageID);
+                }
+            }
+            else if (messageType == MessageType::BROADCAST)
+            {
+                Serial.println("Message -" + messageID + "- received!");
+                Serial.println("Length: " + messageLength);
+                Serial.println("Body: " + messageText);
+
+                if (messageLength.toInt() > messageText.length())
+                    Serial.println("Message needs retransmission! Lengths: " + messageLength + " - " + String(messageText.length()));
+                else if (instance->receivedMessages.find(messageID) == instance->receivedMessages.end())
+                {
+                    instance->receivedMessages.insert(messageID);
+                    instance->sendACK(messageID);
+                }
+            }
+            else 
+            {
+                Serial.println("Message is not for me!");
             }
         }
 

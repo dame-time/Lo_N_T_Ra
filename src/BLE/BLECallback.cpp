@@ -7,6 +7,8 @@
 #include <Crypto.h>
 #include <SHA256.h>
 
+#include <Utils/StringUtils.h>
+
 #define DISCONNECT_CMD "disconnect"
 
 namespace BT::Callbacks {
@@ -238,7 +240,19 @@ namespace BT::Callbacks {
         if (isConnectectedPeersRequest(rxValue.c_str(), pCharacteristic))
             return;
 
-        // Do stuff when properly connected
-        Device::getInstance().loraPeer->sendMessage(rxValue.c_str());
+        auto parsedString = Utils::StringUtils::parseString(rxValue.c_str(), '_');
+
+        if (parsedString.size() > 1)
+        {
+            auto parsedDestination = Utils::StringUtils::parseString(rxValue.c_str(), '-');
+#if DEBUG == 1
+            Serial.println("Destination: " + parsedDestination[1]);
+#endif
+            Device::getInstance().loraPeer->sendMessage(parsedString[0], parsedDestination[1]);
+        }
+        else if (parsedString.size() > 0)
+            Device::getInstance().loraPeer->broadcastMessage(parsedString[0]);
+        else
+            Serial.println("Message could not be sent due to bad formatting -" + String(rxValue.c_str()) + "-");
     }
 }
