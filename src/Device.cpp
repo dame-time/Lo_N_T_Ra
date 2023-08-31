@@ -40,6 +40,7 @@ void Device::initialize()
     loraPeer->sendMessage("My Ass is blue");
 #endif
 
+    xTaskCreate(btUpdateTaskWrapper, "BluetoothUpdateTask", 10000, this, 1, nullptr);
     xTaskCreate(heartbeatTaskWrapper, "Heartbeat Task", 10000, this, 1, nullptr);
 }
 
@@ -170,6 +171,23 @@ void Device::encrypt(uint8_t *data, uint8_t *encrypted)
 void Device::decrypt(uint8_t *encrypted, uint8_t *decrypted)
 {
     aes.decryptBlock(decrypted, encrypted);
+}
+
+void Device::btUpdateTaskWrapper(void *parameter)
+{
+    Device *device = static_cast<Device *>(parameter);
+    device->btUpdateTask(parameter);
+}
+
+void Device::btUpdateTask(void *parameter)
+{
+    Device *device = static_cast<Device *>(parameter);
+
+    while (true)
+    {
+        device->btConnection->update();
+        vTaskDelay(50 / portTICK_PERIOD_MS); // Run every 100 ms
+    }
 }
 
 void Device::update() {

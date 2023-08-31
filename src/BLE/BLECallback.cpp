@@ -146,7 +146,6 @@ namespace BT::Callbacks {
         byte innerHash[32];
         byte temp[1];
 
-        // Inner Hash
         sha256.reset();
         for (int i = 0; i < keyLength; i++)
         {
@@ -184,6 +183,8 @@ namespace BT::Callbacks {
         GUI::Display::getInstance().clear();
         GUI::Display::getInstance() += "Disconnecting...";
 
+        Serial.println("Disconnecting...");
+
         pServer->disconnect(connId);
 
         BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -194,6 +195,9 @@ namespace BT::Callbacks {
         GUI::Display::getInstance() += "Ready to Pair!";
 
         isConnectionValid = false;
+        BLEConnection::isConnected = false;
+
+        // Device::getInstance().btConnection = new BLEConnection(Device::getInstance().getName());
     }
 
     BLECallback::BLECallback(BLEServer *server) : pServer(server)
@@ -218,14 +222,10 @@ namespace BT::Callbacks {
             receivedHexString += buffer;
         }
 
-        // Serial.print("Received String: ");
-        // Serial.println(rxValue.c_str());
-        // Serial.print("Received Value String: ");
-        // Serial.println(receivedHexString);
-
         if (!isConnectionValid)
         {
             connectWithPassword(receivedHexString, pCharacteristic);
+            BLEConnection::isConnected = true;
             return;
         }
 
@@ -239,6 +239,13 @@ namespace BT::Callbacks {
 
         if (isConnectectedPeersRequest(rxValue.c_str(), pCharacteristic))
             return;
+        
+        if (String(rxValue.c_str()).startsWith("MACK:"))
+        {
+            String messageIDAck = String(rxValue.c_str()).substring(5);
+            Device::getInstance().btConnection->confirmMessage(messageIDAck);
+            return;
+        }
 
         auto parsedString = Utils::StringUtils::parseString(rxValue.c_str(), '_');
 

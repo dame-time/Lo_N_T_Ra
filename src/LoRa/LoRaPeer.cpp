@@ -89,6 +89,7 @@ namespace LoRaDevice
         return uuid;
     }
 
+    // TODO: send also the order of the message sent to that particular host, so I can rebuild the order on receival
     void LoRaPeer::sendMessage(const char *msg, const char* destination)
     {
         Message message;
@@ -97,7 +98,8 @@ namespace LoRaDevice
         message.destination = String(destination);
         message.uuid = generateMessageUUID();
         message.lastTimestamp = millis();
-        message.retries = 6;
+        message.orderNumber = messageCounter++;
+        message.retries = 20;
 
         messagesStatus[message.uuid] = message;
         messageQueue.push(message);
@@ -117,7 +119,8 @@ namespace LoRaDevice
         message.destination = "B";
         message.uuid = generateMessageUUID();
         message.lastTimestamp = millis();
-        message.retries = 6;
+        message.orderNumber = messageCounter++;
+        message.retries = 1;
 
         messagesStatus[message.uuid] = message;
         messageQueue.push(message);
@@ -163,17 +166,25 @@ namespace LoRaDevice
         const int interval = 5000;
         static int lastTimestamp = millis();
 
+        static int counter = 0;
+
         if (millis() - lastTimestamp >= interval)
         {
-            // sendMessage("1234567890asdfghjklzxcvbnm");
+            // if (Device::getInstance().getConnectedPeers().size() > 0)
+            // {
+            //     auto sender = Utils::StringUtils::parseString(Device::getInstance().getConnectedPeers().begin()->first.c_str(), '-');
+            //     sendMessage("test" + String(counter++), sender[1]);
+            // }
+
+            // Device::getInstance().btConnection->sendStoredMessage("test123", Device::getInstance().getConnectedPeers().begin()->first);
             for (auto& element : messagesStatus)
                 if (element.second.retries > 0)
                 {
                     messageQueue.push(element.second);
-#if DEBUG == 1
+// #if DEBUG == 1
                     Serial.println();
                     Serial.println("Re-sending Message: " + element.second.body);
-#endif
+// #endif
                     --element.second.retries;
                     element.second.lastTimestamp = millis();
                 }
@@ -182,7 +193,6 @@ namespace LoRaDevice
         }
     }
 
-    // TODO: Handle the queue trnasmission of things properly
     void LoRaPeer::loop()
     {
         checkSentMessages();
@@ -208,7 +218,7 @@ namespace LoRaDevice
                 while (!messageQueue.empty())
                 {
                     Message message = messageQueue.back();
-                    String messageString = message.header + "_" + message.destination + "_" + message.uuid + "_" + message.body;
+                    String messageString = message.header + "_" + message.destination + "_" + message.uuid + "_" + String(message.orderNumber) + "_" + message.body;
 
                     char packet[BUFFER_SIZE];
                     strncpy(packet, messageString.c_str(), BUFFER_SIZE);
@@ -250,6 +260,7 @@ namespace LoRaDevice
         state = STATE_TX;
     }
 
+    // TODO: Send received messages via bluetooth to the application
     void LoRaPeer::OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
     {
         Rssi = rssi;
@@ -300,48 +311,59 @@ namespace LoRaDevice
             auto messageBody = receivedString.substring(2);
             auto parsedString = Utils::StringUtils::parseString(messageBody.c_str(), instance->messageDivider);
 
-            String messageLength = "";
-            String senderID = "";
-            String destinationID = "";
-            String messageID = "";
+            String messageLength = parsedString[0];
+            String senderID = parsedString[1];
+            String destinationID = parsedString[2];
+            String messageID = parsedString[3];
+            String messageOrder = parsedString[4];
             String messageText = "";
+
+            String destinationFullName = "";
+            for (const auto &pair : Device::getInstance().getConnectedPeers())
+                if (pair.first.indexOf(senderID) != -1)
+                    destinationFullName = pair.first;
 
             MessageType messageType;
 
             if (destinationID != "B")
             {
-                messageLength = parsedString[0];
-                senderID = parsedString[1];
-                destinationID = parsedString[2];
-                messageID = parsedString[3];
-                for (int i = 4; i < parsedString.size(); i++)
+                for (int i = 5; i < parsedString.size(); i++)
                     messageText += parsedString[i];
 
                 messageType = MessageType::DIRECT;
             }
             else
             {
-                messageLength = parsedString[0];
-                senderID = parsedString[1];
-                messageID = parsedString[2];
-                for (int i = 3; i < parsedString.size(); i++)
+                for (int i = 5; i < parsedString.size(); i++)
                     messageText += parsedString[i];
 
                 messageType = MessageType::BROADCAST;
             }
+
+            if (destinationFullName == "")
+                return;
+
+            instance->messageCounter++;
 
             if (messageType == MessageType::DIRECT && Device::getInstance().getUUID().equals(destinationID))
             {
                 Serial.println("Message -" + messageID + "- received!");
                 Serial.println("Receiver -" + destinationID + "-");
                 Serial.println("Length: " + messageLength);
+                Serial.println("Order: " + messageOrder);
                 Serial.println("Body: " + messageText);
 
                 if (messageLength.toInt() > messageText.length())
                     Serial.println("Message needs retransmission! Lengths: " + messageLength + " - " + String(messageText.length()));
                 else if (instance->receivedMessages.find(messageID) == instance->receivedMessages.end())
                 {
-                    instance->receivedMessages.insert(messageID);
+                    Serial.println("Destination Full Name: " + destinationFullName);
+                    Device::getInstance().btConnection->addMessageToQueue(messageText, destinationFullName, messageID, messageOrder.toInt());
+
+                    ReceivedMessage rm;
+                    rm.body = messageText;
+                    rm.sender = destinationFullName;
+                    instance->receivedMessages[messageID] = rm;
                     instance->sendACK(messageID);
                 }
             }
@@ -355,7 +377,12 @@ namespace LoRaDevice
                     Serial.println("Message needs retransmission! Lengths: " + messageLength + " - " + String(messageText.length()));
                 else if (instance->receivedMessages.find(messageID) == instance->receivedMessages.end())
                 {
-                    instance->receivedMessages.insert(messageID);
+                    Device::getInstance().btConnection->addMessageToQueue(messageText, "ALL", messageID, messageOrder.toInt());
+
+                    ReceivedMessage rm;
+                    rm.body = messageText;
+                    rm.sender = "ALL";
+                    instance->receivedMessages[messageID] = rm;
                     instance->sendACK(messageID);
                 }
             }

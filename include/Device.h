@@ -42,6 +42,9 @@ class Device
         static void heartbeatTaskWrapper(void *parameter);
         void heartbeatTask(void* parameter);
 
+        static void btUpdateTaskWrapper(void *parameter);
+        void btUpdateTask(void *parameter);
+
     public:
         BT::BLEConnection* btConnection;
         LoRaDevice::LoRaPeer *loraPeer;

@@ -17,20 +17,6 @@ namespace LoRaDevice
     // TODO: Implement Diffie-Hellman protocol in order to exchange private keys for decrypt and encrypt
     class LoRaPeer
     {
-        public:
-            LoRaPeer();
-
-            void broadcastMessage(const char *msg);
-            void broadcastMessage(const String& msg);
-
-            void sendMessage(const char *msg, const char* destination);
-            void sendMessage(const String& msg, const String& destination);
-
-            void sendHeartbeat();
-
-            // Call this function regularly to process incoming messages and other tasks
-            void loop();
-
         private:
             struct Message 
             {
@@ -38,8 +24,15 @@ namespace LoRaDevice
                 String header;
                 String destination;
                 String uuid;
+                int orderNumber;
                 long lastTimestamp;
                 int retries;
+            };
+
+            struct ReceivedMessage
+            {
+                String body;
+                String sender;
             };
 
             enum MessageType
@@ -59,10 +52,10 @@ namespace LoRaDevice
             static LoRaPeer* instance;
             const char messageDivider = '_';
 
+            int messageCounter = 0;
+
             std::map<String, Message> messagesStatus;
             std::queue<Message> messageQueue;
-
-            std::set<String> receivedMessages;
 
             static char txpacket[BUFFER_SIZE];
             static char rxpacket[BUFFER_SIZE];
@@ -88,5 +81,21 @@ namespace LoRaDevice
             static void OnTxDone(void);
             static void OnTxTimeout(void);
             static void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
+
+        public:
+            std::map<String, ReceivedMessage> receivedMessages;
+
+            LoRaPeer();
+
+            void broadcastMessage(const char *msg);
+            void broadcastMessage(const String& msg);
+
+            void sendMessage(const char *msg, const char* destination);
+            void sendMessage(const String& msg, const String& destination);
+
+            void sendHeartbeat();
+
+            // Call this function regularly to process incoming messages and other tasks
+            void loop();
     };
 }
